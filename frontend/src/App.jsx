@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 
-// ─── CORES ──────────────────────────────────────────────────────────────────
 const C = {
   bg:"#0a0e17", surface:"#111827", card:"#151d2e", border:"#1e2d45",
   accent:"#00d4ff", accentDim:"#0099bb", gold:"#f0b429",
@@ -8,7 +7,6 @@ const C = {
   text:"#e2e8f0", muted:"#64748b", dim:"#334155",
 };
 
-// ─── CSS ────────────────────────────────────────────────────────────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -78,18 +76,10 @@ const css = `
   @media(max-width:520px){.grid3{grid-template-columns:1fr}.compare-grid{grid-template-columns:1fr 1fr}.tabs{overflow-x:auto}}
 `;
 
-// ─── UTILS ──────────────────────────────────────────────────────────────────
 const fmtBRL = v => v==null?"—":`R$ ${Number(v).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".")}`;
 const fmtPct = v => v==null?"—":`${Number(v).toFixed(1).replace(".",",")}%`;
 const fmtN   = (v,d=2) => v==null?"—":Number(v).toFixed(d).replace(".",",");
-const fmtM   = v => { // formata em milhões/bilhões
-  if(v==null) return "—";
-  const n=Number(v);
-  if(Math.abs(n)>=1e9) return `R$ ${(n/1e9).toFixed(1).replace(".",",")}B`;
-  if(Math.abs(n)>=1e6) return `R$ ${(n/1e6).toFixed(1).replace(".",",")}M`;
-  return fmtBRL(n);
-};
-const safe = (v,fallback=null) => (v!=null&&!isNaN(v)&&isFinite(v))?v:fallback;
+const fmtM   = v => { if(v==null)return"—"; const n=Number(v); if(Math.abs(n)>=1e9)return`R$ ${(n/1e9).toFixed(1).replace(".",",")}B`; if(Math.abs(n)>=1e6)return`R$ ${(n/1e6).toFixed(1).replace(".",",")}M`; return fmtBRL(n); };
 const scoreColor = s => s>=75?C.green:s>=55?C.yellow:s>=35?C.orange:C.red;
 
 const recConfig = {
@@ -103,203 +93,19 @@ const recConfig = {
 };
 
 function sigColor(s){
-  if(!s) return C.muted;
+  if(!s)return C.muted;
   const l=s.toLowerCase();
-  if(l.includes("excelente")||l.includes("ótimo")||l.includes("bom")||l.includes("segura")||l.includes("baixo risco")||l.includes("sem manipul")) return C.green;
-  if(l.includes("moderado")||l.includes("cinza")||l.includes("neutro")) return C.yellow;
-  if(l.includes("alto")||l.includes("fraco")||l.includes("risco")||l.includes("negativo")||l.includes("manipul")) return C.orange;
+  if(l.includes("excelente")||l.includes("bom")||l.includes("segura")||l.includes("baixo risco")||l.includes("sem manipul"))return C.green;
+  if(l.includes("moderado")||l.includes("cinza")||l.includes("neutro"))return C.yellow;
+  if(l.includes("alto")||l.includes("fraco")||l.includes("risco")||l.includes("negativo")||l.includes("manipul"))return C.orange;
   return C.muted;
 }
 
-// ─── EXTRATOR DE DADOS BRAPI ────────────────────────────────────────────────
-function extrairDados(r) {
-  // r = results[0] da resposta Brapi
-  const ks  = r.defaultKeyStatistics || {};
-  const fd  = r.financialData        || {};
-  const sp  = r.summaryProfile       || {};
-
-  // Balanço mais recente
-  const bs  = (r.balanceSheetHistory?.balanceSheetStatements || [])[0] || {};
-  // DRE mais recente
-  const is_ = (r.incomeStatementHistory?.incomeStatementHistory || [])[0] || {};
-  // Fluxo de caixa mais recente
-  const cf  = (r.cashflowHistory?.cashflowStatements || [])[0] || {};
-  // Dividendos
-  const divs = r.dividendsData?.cashDividends || [];
-
-  const preco   = safe(r.regularMarketPrice);
-  const shares  = safe(ks.sharesOutstanding) || safe(r.regularMarketVolume * 100);
-  const mktCap  = safe(r.marketCap) || safe(ks.marketCap);
-  const lpa     = safe(ks.trailingEps);
-  const vpa     = safe(ks.bookValue);
-  const beta    = safe(ks.beta);
-  const roe     = safe(ks.returnOnEquity);   // decimal
-  const roic    = safe(fd.returnOnCapital);  // decimal ou null
-  const pl      = safe(ks.trailingPE) || (preco&&lpa&&lpa>0?preco/lpa:null);
-  const pvp     = safe(ks.priceToBook) || (preco&&vpa&&vpa>0?preco/vpa:null);
-  const dy_raw  = safe(ks.dividendYield); // decimal
-  const ebitda  = safe(fd.ebitda);
-  const receita = safe(fd.totalRevenue);
-  const lucroLiq= safe(fd.netIncomeToCommon) || safe(is_.netIncome);
-  const divLiq  = safe(fd.totalDebt) - safe(fd.totalCash) || null;
-  const pl_     = safe(bs.totalStockholderEquity);
-  const totalDeb= safe(fd.totalDebt);
-  const freeCF  = safe(fd.freeCashflow);
-  const opCF    = safe(fd.operatingCashflow);
-  const grossP  = safe(fd.grossProfits);
-  const revGrow = safe(fd.revenueGrowth); // decimal
-  const epsGrow = safe(fd.earningsGrowth); // decimal
-
-  // DPA estimado a partir do histórico de dividendos (últimos 12 meses)
-  const um_ano = Date.now() - 365*24*3600*1000;
-  const dpaReal = divs.length>0
-    ? divs.filter(d=>new Date(d.paymentDate||d.lastDatePriorEx).getTime()>um_ano)
-           .reduce((s,d)=>s+(d.rate||0),0)
-    : null;
-  const dpa = safe(dpaReal) || (dy_raw&&preco ? dy_raw*preco : null);
-
-  // EV
-  const ev = mktCap!=null&&totalDeb!=null ? mktCap + totalDeb - (safe(fd.totalCash)||0) : null;
-  const ebit = safe(is_.ebit) || (ebitda?ebitda*0.75:null);
-
-  // Margens
-  const mLiq    = receita&&lucroLiq ? (lucroLiq/receita)*100 : safe(fd.profitMargins)*100;
-  const mBruta  = receita&&grossP   ? (grossP/receita)*100   : null;
-  const mEbitda = receita&&ebitda   ? (ebitda/receita)*100   : safe(fd.ebitdaMargins)*100;
-
-  // Múltiplos derivados
-  const evEbitda= ev&&ebitda&&ebitda>0 ? ev/ebitda : null;
-  const evEbit  = ev&&ebit&&ebit>0     ? ev/ebit   : null;
-  const divEbitda = ebitda&&ebitda>0&&totalDeb ? totalDeb/ebitda : null;
-
-  // PEG
-  const peg = pl&&epsGrow&&epsGrow>0 ? pl/(epsGrow*100) : null;
-
-  // DY %
-  const dyPct = dy_raw!=null ? dy_raw*100 : (dpa&&preco ? (dpa/preco)*100 : null);
-
-  // ROE/ROIC em %
-  const roePct  = roe!=null  ? roe*100  : null;
-  const roicPct = roic!=null ? roic*100 : null;
-
-  // Crescimento receita/lucro em %
-  const creceitaPct = revGrow!=null ? revGrow*100 : null;
-  const clucPct     = epsGrow!=null ? epsGrow*100 : null;
-
-  // Cobertura de juros estimada
-  const cobJuros = safe(fd.interestCoverage) || (ebit&&totalDeb&&totalDeb>0?(ebit/(totalDeb*0.1)):null);
-
-  // Campos de texto
-  const nome  = r.longName || r.shortName || r.symbol;
-  const setor = sp.sector || r.sector || "—";
-  const ticker= r.symbol;
-
-  // WACC estimado (Selic ~10,5 + prêmio risco setorial)
-  const wacc = 12.5;
-  const g    = 4.0;
-
-  return {
-    ticker, nome, setor, preco,
-    lpa, vpa, dpa, beta,
-    mktCap, shares, ebitda, ebit, receita, lucroLiq,
-    divLiq, pl_, totalDeb,
-    freeCF, opCF,
-    roe: roePct, roic: roicPct,
-    mLiq, mBruta, mEbitda,
-    dyPct, pl, pvp, evEbitda, evEbit, ev,
-    divEbitda, cobJuros, peg,
-    creceitaPct, clucPct,
-    wacc, g,
-    // flags de qualidade de dado
-    _temFundamentos: !!(ks.trailingPE || fd.ebitda || bs.totalStockholderEquity),
-    _temDividendos:  divs.length>0,
-  };
-}
-
-// ─── CÁLCULO DE VALUATION ───────────────────────────────────────────────────
-function calcularValuation(d) {
-  const {preco,lpa,vpa,dpa,lucroLiq,shares,ebitda,divLiq,mktCap,wacc,g,ev,ebit} = d;
-
-  // Graham: sqrt(22.5 * LPA * VPA) * 0.75 (margem conservadora)
-  const graham = lpa>0&&vpa>0 ? Math.sqrt(22.5*lpa*vpa)*0.75 : null;
-
-  // Bazin: DPA / 0.06
-  const bazin = dpa&&dpa>0 ? dpa/0.06 : null;
-
-  // Gordon DDM: DPA / (WACC% - g%)
-  const gordRate = (wacc - g)/100;
-  const gordon = dpa&&dpa>0&&gordRate>0.01 ? dpa/gordRate : null;
-
-  // DCF simplificado com FCL real ou estimado
-  const fclPorAcao = d.freeCF&&shares&&shares>0
-    ? d.freeCF/shares
-    : (lucroLiq&&shares&&shares>0 ? (lucroLiq*0.7)/shares : null);
-
-  let dcf = null;
-  if(fclPorAcao&&fclPorAcao>0){
-    let dcfFCL=0;
-    for(let i=1;i<=10;i++) dcfFCL+=(fclPorAcao*Math.pow(1+g/100,i))/Math.pow(1+wacc/100,i);
-    const terminal=(fclPorAcao*Math.pow(1+g/100,10)*(1+g/100))/((wacc/100-g/100)*Math.pow(1+wacc/100,10));
-    dcf=dcfFCL+terminal;
-  }
-
-  // EV/EBITDA (múltiplo justo setorial ~7x)
-  const evEbitdaJusto = ebitda&&ebitda>0&&shares&&shares>0
-    ? Math.max(0,(7*ebitda-(divLiq||0))/shares)
-    : null;
-
-  // EV/EBIT (múltiplo justo ~10x)
-  const evEbitJusto = ebit&&ebit>0&&shares&&shares>0
-    ? Math.max(0,(10*ebit-(divLiq||0))/shares)
-    : null;
-
-  // Valor justo ponderado (apenas modelos com resultado válido)
-  const modelos = [
-    graham       ? {nome:"Graham (adj.)",  v:graham,        w:2.0, real:!!(lpa&&vpa)} : null,
-    bazin        ? {nome:"Bazin",          v:bazin,         w:1.5, real:!!(dpa)} : null,
-    gordon       ? {nome:"Gordon DDM",     v:gordon,        w:1.5, real:!!(dpa)} : null,
-    dcf          ? {nome:"DCF",            v:dcf,           w:3.0, real:!!(d.freeCF)} : null,
-    evEbitdaJusto? {nome:"EV/EBITDA 7x",  v:evEbitdaJusto, w:2.0, real:!!(ebitda)} : null,
-    evEbitJusto  ? {nome:"EV/EBIT 10x",   v:evEbitJusto,   w:1.5, real:!!(ebit)} : null,
-  ].filter(Boolean);
-
-  const totalW = modelos.reduce((s,m)=>s+m.w,0);
-  const valorJusto = totalW>0 ? modelos.reduce((s,m)=>s+m.v*m.w,0)/totalW : preco;
-  const margemSeg  = preco&&valorJusto ? ((valorJusto-preco)/valorJusto)*100 : null;
-
-  return { modelos, valorJusto, margemSeg };
-}
-
-// ─── INDICADORES PARA EXIBIÇÃO ───────────────────────────────────────────────
-function montarIndicadores(d, val) {
-  const {pl,pvp,evEbitda,evEbit,dyPct,peg,roe,roic,mLiq,mEbitda,mBruta,divEbitda,cobJuros,creceitaPct,clucPct,beta} = d;
-  const {margemSeg} = val;
-  return {
-    "P/L":           {val:pl,        sinal:pl?(pl<8?"Excelente":pl<15?"Bom":pl<25?"Moderado":"Alto"):null},
-    "P/VP":          {val:pvp,       sinal:pvp?(pvp<1?"Excelente":pvp<2?"Bom":pvp<3?"Moderado":"Alto"):null},
-    "EV/EBITDA":     {val:evEbitda,  sinal:evEbitda?(evEbitda<5?"Excelente":evEbitda<8?"Bom":evEbitda<12?"Moderado":"Alto"):null},
-    "EV/EBIT":       {val:evEbit,    sinal:evEbit?(evEbit<7?"Excelente":evEbit<12?"Bom":"Moderado"):null},
-    "DY":            {val:dyPct,     sinal:dyPct?(dyPct>8?"Excelente":dyPct>5?"Bom":dyPct>3?"Moderado":"Baixo"):null, unit:"%"},
-    "ROE":           {val:roe,       sinal:roe!=null?(roe>20?"Excelente":roe>12?"Bom":roe>6?"Moderado":"Fraco"):null, unit:"%"},
-    "ROIC":          {val:roic,      sinal:roic!=null?(roic>15?"Excelente":roic>10?"Bom":roic>5?"Moderado":"Fraco"):null, unit:"%"},
-    "PEG":           {val:peg,       sinal:peg?(peg<1?"Excelente":peg<1.5?"Bom":peg<2?"Moderado":"Alto"):null},
-    "Margem Líq.":   {val:mLiq,      sinal:mLiq!=null?(mLiq>20?"Excelente":mLiq>10?"Bom":mLiq>5?"Moderado":"Fraco"):null, unit:"%"},
-    "Margem EBITDA": {val:mEbitda,   sinal:mEbitda!=null?(mEbitda>35?"Excelente":mEbitda>20?"Bom":mEbitda>10?"Moderado":"Fraco"):null, unit:"%"},
-    "Margem Bruta":  {val:mBruta,    sinal:mBruta!=null?(mBruta>50?"Excelente":mBruta>30?"Bom":"Moderado"):null, unit:"%"},
-    "Dív/EBITDA":    {val:divEbitda, sinal:divEbitda!=null?(divEbitda<1?"Excelente":divEbitda<2?"Bom":divEbitda<3.5?"Moderado":"Alto Risco"):null},
-    "Cob. Juros":    {val:cobJuros,  sinal:cobJuros!=null?(cobJuros>5?"Excelente":cobJuros>2?"Moderado":"Alto Risco"):null},
-    "Cresc. Receita":{val:creceitaPct,sinal:creceitaPct!=null?(creceitaPct>15?"Excelente":creceitaPct>8?"Bom":creceitaPct>0?"Moderado":"Negativo"):null, unit:"%"},
-    "Cresc. Lucro":  {val:clucPct,   sinal:clucPct!=null?(clucPct>15?"Excelente":clucPct>8?"Bom":clucPct>0?"Moderado":"Negativo"):null, unit:"%"},
-    "Beta":          {val:beta,      sinal:beta!=null?(beta<0.8?"Baixo Risco":beta<1.2?"Moderado":"Alto Risco"):null},
-    "Margem Seg.":   {val:margemSeg, sinal:margemSeg!=null?(margemSeg>30?"Excelente":margemSeg>15?"Bom":margemSeg>0?"Moderado":"Acima do Justo"):null, unit:"%"},
-  };
-}
-
-// ─── CHAMADAS DE API ─────────────────────────────────────────────────────────
+// ─── CHAMADAS API ────────────────────────────────────────────────────────────
 async function fetchBrapi(ticker) {
   const res = await fetch(`/api/brapi?ticker=${encodeURIComponent(ticker)}`);
   const data = await res.json();
-  if(!res.ok) throw new Error(data.error || "Erro ao buscar dados na Brapi");
+  if(!res.ok) throw new Error(data.error||"Erro ao buscar dados na Brapi");
   const r = data.results?.[0];
   if(!r) throw new Error(`Ticker "${ticker}" não encontrado na B3`);
   return r;
@@ -307,9 +113,8 @@ async function fetchBrapi(ticker) {
 
 async function callAI(userPrompt, systemPrompt) {
   const res = await fetch("/api/analyze", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({system:systemPrompt, messages:[{role:"user",content:userPrompt}]}),
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({system:systemPrompt, messages:[{role:"user",content:userPrompt}]}),
   });
   const data = await res.json();
   if(!res.ok) throw new Error(data.error||"Erro na API de IA");
@@ -318,60 +123,172 @@ async function callAI(userPrompt, systemPrompt) {
 
 // ─── MOTOR PRINCIPAL ─────────────────────────────────────────────────────────
 async function analisarAcao(ticker, setStep) {
+  const sys = `Você é um analista fundamentalista sênior especializado em ações da B3.
+Responda SEMPRE em JSON puro, sem markdown, sem texto fora do JSON.`;
+
+  // PASSO 1 — dados reais da Brapi (plano gratuito: cotação + perfil + dividendos)
   setStep(1);
   const raw = await fetchBrapi(ticker.toUpperCase());
 
+  // Extrair o que o plano gratuito fornece
+  const sp   = raw.summaryProfile || {};
+  const divs = raw.dividendsData?.cashDividends || [];
+  const preco = raw.regularMarketPrice;
+  const nome  = raw.longName || raw.shortName || raw.symbol;
+  const setor = sp.sector || raw.sector || "—";
+  const mktCap= raw.marketCap;
+  const change= raw.regularMarketChangePercent;
+
+  // DPA real dos últimos 12 meses
+  const umAno = Date.now() - 365*24*3600*1000;
+  const dpaReal = divs.length>0
+    ? divs.filter(d=>new Date(d.paymentDate||d.lastDatePriorEx).getTime()>umAno).reduce((s,d)=>s+(d.rate||0),0)
+    : null;
+
+  // PASSO 2 — IA estima os fundamentais com base no que conhece + dados reais disponíveis
   setStep(2);
-  const d = extrairDados(raw);
+  const promptFund = `A ação ${ticker.toUpperCase()} (${nome}) do setor ${setor} está cotada a ${fmtBRL(preco)} com market cap de ${fmtM(mktCap)}.
+${dpaReal ? `Dividendos pagos nos últimos 12 meses (dado REAL da B3): R$ ${dpaReal.toFixed(2)} por ação.` : "Dados de dividendos não disponíveis."}
 
+Com base no seu conhecimento desta empresa (dados de 2023/2024), estime os indicadores fundamentalistas.
+⚠️ Use o preço atual fornecido (${fmtBRL(preco)}) para calcular múltiplos como P/L, P/VP, DY.
+${dpaReal ? `⚠️ Use o DPA real fornecido (R$ ${dpaReal.toFixed(2)}) para DY e Bazin.` : ""}
+
+Retorne JSON:
+{
+  "lpa": number,
+  "vpa": number,
+  "dpa": number,
+  "ebitda_bi": number,
+  "receita_bi": number,
+  "lucro_liquido_bi": number,
+  "divida_liquida_bi": number,
+  "patrimonio_liquido_bi": number,
+  "shares_milhoes": number,
+  "roe": number,
+  "roic": number,
+  "margem_liquida": number,
+  "margem_ebitda": number,
+  "margem_bruta": number,
+  "crescimento_lucro_5a": number,
+  "crescimento_receita_5a": number,
+  "divida_ebitda": number,
+  "cobertura_juros": number,
+  "beta": number,
+  "wacc": number,
+  "crescimento_perpetuidade": number,
+  "piotroski": number,
+  "altman_z": number,
+  "beneish_m": number,
+  "confianca_estimativas": "Alta" | "Média" | "Baixa"
+}`;
+
+  const fundRaw = await callAI(promptFund, sys);
+  let fund;
+  try { fund = JSON.parse(fundRaw.replace(/```json|```/g,"").trim()); }
+  catch { throw new Error("Erro ao processar estimativas da IA."); }
+
+  // PASSO 3 — calcular valuation
   setStep(3);
-  const val = calcularValuation(d);
-  const ind = montarIndicadores(d, val);
+  const lpa    = fund.lpa;
+  const vpa    = fund.vpa;
+  const dpa    = dpaReal || fund.dpa;
+  const wacc   = fund.wacc || 12.5;
+  const g      = fund.crescimento_perpetuidade || 4;
+  const shares = (fund.shares_milhoes||1) * 1e6;
+  const ebitda = (fund.ebitda_bi||0) * 1e9;
+  const lucroLiq=(fund.lucro_liquido_bi||0)*1e9;
+  const divLiq = (fund.divida_liquida_bi||0)*1e9;
+  const pl_    = (fund.patrimonio_liquido_bi||0)*1e9;
+  const receita= (fund.receita_bi||0)*1e9;
+  const ebit   = ebitda*0.8;
 
+  const graham = lpa>0&&vpa>0 ? Math.sqrt(22.5*lpa*vpa)*0.75 : null;
+  const bazin  = dpa>0 ? dpa/0.06 : null;
+  const gordRate=(wacc-g)/100;
+  const gordon = dpa>0&&gordRate>0.01 ? dpa/gordRate : null;
+  const fclPA  = lucroLiq>0&&shares>0 ? (lucroLiq*0.7)/shares : null;
+  let dcf=null;
+  if(fclPA&&fclPA>0){
+    let d2=0; for(let i=1;i<=10;i++) d2+=(fclPA*Math.pow(1+g/100,i))/Math.pow(1+wacc/100,i);
+    const term=(fclPA*Math.pow(1+g/100,10)*(1+g/100))/((wacc/100-g/100)*Math.pow(1+wacc/100,10));
+    dcf=d2+term;
+  }
+  const ev = mktCap!=null ? mktCap+divLiq : null;
+  const evEbitdaJusto = ebitda>0&&shares>0 ? Math.max(0,(7*ebitda-divLiq)/shares) : null;
+
+  const modelos=[
+    graham?{nome:"Graham (adj.)",v:graham,w:2}:null,
+    bazin?{nome:"Bazin",v:bazin,w:dpaReal?2:1.5}:null,
+    gordon?{nome:"Gordon DDM",v:gordon,w:dpaReal?2:1.5}:null,
+    dcf?{nome:"DCF",v:dcf,w:3}:null,
+    evEbitdaJusto?{nome:"EV/EBITDA 7x",v:evEbitdaJusto,w:2}:null,
+  ].filter(Boolean);
+
+  const totalW=modelos.reduce((s,m)=>s+m.w,0);
+  const valorJusto=totalW>0?modelos.reduce((s,m)=>s+m.v*m.w,0)/totalW:preco;
+  const margemSeg=preco&&valorJusto?((valorJusto-preco)/valorJusto)*100:null;
+
+  // Múltiplos
+  const pL   = lpa>0?preco/lpa:null;
+  const pVp  = vpa>0?preco/vpa:null;
+  const evEb = ev&&ebitda>0?ev/ebitda:null;
+  const evEi = ev&&ebit>0?ev/ebit:null;
+  const dyPct= dpa&&preco?(dpa/preco)*100:null;
+  const peg  = pL&&fund.crescimento_lucro_5a>0?pL/fund.crescimento_lucro_5a:null;
+
+  const ind = {
+    "P/L":           {val:pL,             sinal:pL?(pL<8?"Excelente":pL<15?"Bom":pL<25?"Moderado":"Alto"):null},
+    "P/VP":          {val:pVp,            sinal:pVp?(pVp<1?"Excelente":pVp<2?"Bom":"Moderado"):null},
+    "EV/EBITDA":     {val:evEb,           sinal:evEb?(evEb<5?"Excelente":evEb<8?"Bom":evEb<12?"Moderado":"Alto"):null},
+    "EV/EBIT":       {val:evEi,           sinal:evEi?(evEi<7?"Excelente":evEi<12?"Bom":"Moderado"):null},
+    "DY":            {val:dyPct,          sinal:dyPct?(dyPct>8?"Excelente":dyPct>5?"Bom":dyPct>3?"Moderado":"Baixo"):null, unit:"%"},
+    "ROE":           {val:fund.roe,       sinal:fund.roe?(fund.roe>20?"Excelente":fund.roe>12?"Bom":fund.roe>6?"Moderado":"Fraco"):null, unit:"%"},
+    "ROIC":          {val:fund.roic,      sinal:fund.roic?(fund.roic>15?"Excelente":fund.roic>10?"Bom":fund.roic>5?"Moderado":"Fraco"):null, unit:"%"},
+    "PEG":           {val:peg,            sinal:peg?(peg<1?"Excelente":peg<1.5?"Bom":"Alto"):null},
+    "Margem Líq.":   {val:fund.margem_liquida, sinal:fund.margem_liquida?(fund.margem_liquida>20?"Excelente":fund.margem_liquida>10?"Bom":fund.margem_liquida>5?"Moderado":"Fraco"):null, unit:"%"},
+    "Margem EBITDA": {val:fund.margem_ebitda,  sinal:fund.margem_ebitda?(fund.margem_ebitda>35?"Excelente":fund.margem_ebitda>20?"Bom":"Moderado"):null, unit:"%"},
+    "Margem Bruta":  {val:fund.margem_bruta,   sinal:fund.margem_bruta?(fund.margem_bruta>50?"Excelente":fund.margem_bruta>30?"Bom":"Moderado"):null, unit:"%"},
+    "Dív/EBITDA":    {val:fund.divida_ebitda,  sinal:fund.divida_ebitda!=null?(fund.divida_ebitda<1?"Excelente":fund.divida_ebitda<2?"Bom":fund.divida_ebitda<3.5?"Moderado":"Alto Risco"):null},
+    "Cob. Juros":    {val:fund.cobertura_juros,sinal:fund.cobertura_juros?(fund.cobertura_juros>5?"Excelente":fund.cobertura_juros>2?"Moderado":"Alto Risco"):null},
+    "Cresc. Lucro":  {val:fund.crescimento_lucro_5a, sinal:fund.crescimento_lucro_5a?(fund.crescimento_lucro_5a>15?"Excelente":fund.crescimento_lucro_5a>8?"Bom":fund.crescimento_lucro_5a>0?"Moderado":"Negativo"):null, unit:"%"},
+    "Cresc. Receita":{val:fund.crescimento_receita_5a,sinal:fund.crescimento_receita_5a?(fund.crescimento_receita_5a>15?"Excelente":fund.crescimento_receita_5a>8?"Bom":fund.crescimento_receita_5a>0?"Moderado":"Negativo"):null, unit:"%"},
+    "Beta":          {val:fund.beta,      sinal:fund.beta?(fund.beta<0.8?"Baixo Risco":fund.beta<1.2?"Moderado":"Alto Risco"):null},
+    "Piotroski":     {val:fund.piotroski, sinal:fund.piotroski?(fund.piotroski>=7?"Excelente":fund.piotroski>=5?"Bom":fund.piotroski>=3?"Moderado":"Fraco"):null},
+    "Altman Z":      {val:fund.altman_z,  sinal:fund.altman_z?(fund.altman_z>2.99?"Zona Segura":fund.altman_z>1.81?"Zona Cinza":"Zona de Risco"):null},
+    "Beneish M":     {val:fund.beneish_m, sinal:fund.beneish_m?(fund.beneish_m<-2.22?"Sem Manipulação":"Risco de Manipulação"):null},
+    "Margem Seg.":   {val:margemSeg,      sinal:margemSeg!=null?(margemSeg>30?"Excelente":margemSeg>15?"Bom":margemSeg>0?"Moderado":"Acima do Justo"):null, unit:"%"},
+  };
+
+  // PASSO 4 — análise IA
   setStep(4);
-  // Monta resumo para a IA
-  const resumo = [
-    `Ticker: ${d.ticker} | Empresa: ${d.nome} | Setor: ${d.setor}`,
-    `Preço atual: ${fmtBRL(d.preco)} | Valor Justo calculado: ${fmtBRL(val.valorJusto)} | Margem de segurança: ${fmtPct(val.margemSeg)}`,
-    `Modelos: ${val.modelos.map(m=>`${m.nome}=${fmtBRL(m.v)}`).join(", ")}`,
-    `P/L=${fmtN(d.pl)} | P/VP=${fmtN(d.pvp)} | EV/EBITDA=${fmtN(d.evEbitda)} | EV/EBIT=${fmtN(d.evEbit)}`,
-    `DY=${fmtPct(d.dyPct)} | ROE=${fmtPct(d.roe)} | ROIC=${fmtPct(d.roic)} | PEG=${fmtN(d.peg)}`,
-    `Margem Líq=${fmtPct(d.mLiq)} | Margem EBITDA=${fmtPct(d.mEbitda)} | Margem Bruta=${fmtPct(d.mBruta)}`,
-    `Dív/EBITDA=${fmtN(d.divEbitda)} | Cob.Juros=${fmtN(d.cobJuros)} | Beta=${fmtN(d.beta)}`,
-    `Cresc.Receita=${fmtPct(d.creceitaPct)} | Cresc.Lucro=${fmtPct(d.clucPct)}`,
-    `EBITDA=${fmtM(d.ebitda)} | Receita=${fmtM(d.receita)} | Lucro Líq=${fmtM(d.lucroLiq)} | FCL=${fmtM(d.freeCF)}`,
+  const resumo=[
+    `Ticker: ${ticker.toUpperCase()} | Empresa: ${nome} | Setor: ${setor}`,
+    `Preço REAL (Brapi): ${fmtBRL(preco)} | Market Cap: ${fmtM(mktCap)} | Variação hoje: ${change?.toFixed(2)||"—"}%`,
+    `DPA (${dpaReal?"REAL - B3":"estimado"}): ${fmtBRL(dpa)} | DY: ${fmtPct(dyPct)}`,
+    `Valor Justo calculado: ${fmtBRL(valorJusto)} | Margem de segurança: ${fmtPct(margemSeg)}`,
+    `Modelos: ${modelos.map(m=>`${m.nome}=${fmtBRL(m.v)}`).join(", ")}`,
+    `P/L=${fmtN(pL)} | P/VP=${fmtN(pVp)} | EV/EBITDA=${fmtN(evEb)} | ROE=${fmtPct(fund.roe)} | ROIC=${fmtPct(fund.roic)}`,
+    `Margem Líq=${fmtPct(fund.margem_liquida)} | Dív/EBITDA=${fmtN(fund.divida_ebitda)} | Piotroski=${fund.piotroski} | Altman Z=${fmtN(fund.altman_z)}`,
+    `⚠️ ATENÇÃO: Preço e DPA são dados REAIS. Demais fundamentos são ESTIMATIVAS da IA (confiança: ${fund.confianca_estimativas}).`,
   ].join("\n");
 
   const analiseRaw = await callAI(
-    `Analise a ação com os dados reais abaixo e gere um JSON com a avaliação fundamentalista:
-
-${resumo}
-
-IMPORTANTE: Os dados acima são REAIS, coletados da API Brapi (B3 + CVM). Baseie toda a análise exclusivamente neles.
-Valores "—" indicam dado não disponível para este ativo.
-
-Retorne APENAS JSON puro (sem markdown):
-{
-  "score_ia": number (0-100),
-  "nivel_confianca": "Alta" | "Média" | "Baixa",
-  "recomendacao": "Compra Fortemente Favorável" | "Compra Favorável" | "Compra com Ressalvas" | "Manter" | "Aguardar Melhor Oportunidade" | "Desfavorável no Momento" | "Fortemente Desfavorável",
-  "resumo_executivo": "string 2-3 frases objetivas sobre a situação atual",
-  "pontos_positivos": ["string","string","string"],
-  "pontos_atencao": ["string","string"],
-  "principais_riscos": ["string","string"],
-  "fundamentacao": "string 2-3 frases explicando a recomendação com base nos dados"
-}`,
-    `Você é um analista fundamentalista sênior especializado em ações da B3. 
-Responda SEMPRE em JSON puro, sem markdown, sem texto fora do JSON.
-Seja objetivo, use os números fornecidos e evite especulações além dos dados.`
+    `Analise a ação com os dados abaixo e gere avaliação fundamentalista:\n\n${resumo}\n\nIMPORTANTE: Deixe claro na análise quais dados são reais (preço, DPA quando indicado) e quais são estimativas. Retorne APENAS JSON:\n{"score_ia":number,"nivel_confianca":"Alta"|"Média"|"Baixa","recomendacao":"Compra Fortemente Favorável"|"Compra Favorável"|"Compra com Ressalvas"|"Manter"|"Aguardar Melhor Oportunidade"|"Desfavorável no Momento"|"Fortemente Desfavorável","resumo_executivo":"string","pontos_positivos":["","",""],"pontos_atencao":["",""],"principais_riscos":["",""],"fundamentacao":"string"}`,
+    sys
   );
 
   let analise;
   try { analise = JSON.parse(analiseRaw.replace(/```json|```/g,"").trim()); }
-  catch { throw new Error("Erro ao processar análise da IA. Tente novamente."); }
+  catch { throw new Error("Erro ao processar análise da IA."); }
 
   setStep(5);
-  return { d, ind, val, analise, raw, timestamp: new Date() };
+  return {
+    ticker:ticker.toUpperCase(), nome, setor, preco, mktCap, change,
+    dpa, dpaReal, fund, ind, modelos, valorJusto, margemSeg,
+    pL, pVp, evEb, dyPct, analise, timestamp:new Date(),
+    ebitda, receita, lucroLiq, divLiq, pl_,
+  };
 }
 
 // ─── COMPONENTES ─────────────────────────────────────────────────────────────
@@ -405,13 +322,7 @@ function Ind({name,val,sinal,unit=""}){
   );
 }
 
-function SourceBadge({real}){
-  return real
-    ? <span className="source-badge source-real">✓ Dado Real</span>
-    : <span className="source-badge source-est">~ Estimado</span>;
-}
-
-// ─── APP ──────────────────────────────────────────────────────────────────────
+// ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App(){
   const [aba,setAba]=useState("analise");
   const [ticker,setTicker]=useState("");
@@ -424,7 +335,7 @@ export default function App(){
   const [loadingComp,setLoadingComp]=useState(false);
   const [comparacao,setComparacao]=useState(null);
 
-  const STEPS=["Inicializando…","Buscando dados reais na Brapi (B3 + CVM)…","Extraindo fundamentos do balanço…","Calculando modelos de valuation…","IA analisando os indicadores…","Consolidando resultado…"];
+  const STEPS=["Inicializando…","Buscando cotação real na B3 via Brapi…","IA estimando fundamentos…","Calculando modelos de valuation…","IA analisando indicadores…","Consolidando resultado…"];
 
   const analisar=useCallback(async()=>{
     if(!ticker.trim())return;
@@ -432,11 +343,7 @@ export default function App(){
     try{
       const res=await analisarAcao(ticker.trim(),setStep);
       setResultado(res);
-      setHistorico(h=>[{
-        data:res.timestamp, ticker:res.d.ticker, preco:res.d.preco,
-        valorJusto:res.val.valorJusto, score:res.analise.score_ia, rec:res.analise.recomendacao,
-        temFund:res.d._temFundamentos,
-      },...h].slice(0,50));
+      setHistorico(h=>[{data:res.timestamp,ticker:res.ticker,preco:res.preco,valorJusto:res.valorJusto,score:res.analise.score_ia,rec:res.analise.recomendacao},...h].slice(0,50));
       setAba("analise");
     }catch(e){setErro(e.message);}
     finally{setLoading(false);setStep(0);}
@@ -446,201 +353,147 @@ export default function App(){
     const list=tickers5.filter(t=>t.trim());
     if(list.length<2)return;
     setLoadingComp(true);setComparacao(null);setErro("");
-    try{
-      const resultados=await Promise.all(list.map(t=>analisarAcao(t.trim(),()=>{})));
-      setComparacao(resultados);
-    }catch(e){setErro(e.message);}
+    try{ const r=await Promise.all(list.map(t=>analisarAcao(t.trim(),()=>{}))); setComparacao(r); }
+    catch(e){setErro(e.message);}
     finally{setLoadingComp(false);}
   },[tickers5]);
 
-  // ── RENDER ANÁLISE ──────────────────────────────────────────────────────────
   const renderAnalise=()=>{
-    if(loading) return(
+    if(loading)return(
       <div className="loading-wrap">
         <div className="spinner"/>
         <div className="loading-steps">
-          {STEPS.map((s,i)=>(
-            <div key={i} className={i<step?"done":i===step?"cur":""}>
-              {i<step?"✓ ":i===step?"⟳ ":"  "}{s}
-            </div>
-          ))}
+          {STEPS.map((s,i)=><div key={i} className={i<step?"done":i===step?"cur":""}>{i<step?"✓ ":i===step?"⟳ ":"  "}{s}</div>)}
         </div>
-        <div style={{fontSize:12,color:C.muted,marginTop:8}}>Dados reais via Brapi · CVM · B3</div>
+        <div style={{fontSize:12,color:C.muted}}>Cotação real · Fundamentos estimados pela IA</div>
       </div>
     );
-
-    if(erro) return(
-      <div className="empty-state">
-        <div className="empty-icon">⚠️</div>
-        <h3>Erro na análise</h3>
-        <p style={{color:C.red,marginBottom:16}}>{erro}</p>
-        <p style={{fontSize:13}}>Verifique se o ticker está correto e se a chave BRAPI_TOKEN está configurada no Vercel.</p>
-      </div>
-    );
-
-    if(!resultado) return(
+    if(erro)return <div className="empty-state"><div className="empty-icon">⚠️</div><h3>Erro na análise</h3><p style={{color:C.red}}>{erro}</p></div>;
+    if(!resultado)return(
       <div className="empty-state">
         <div className="empty-icon">📊</div>
         <h3>Insira um ticker para começar</h3>
         <p>Ex.: PETR4, WEGE3, VALE3, ITUB4, POMO4, EGIE3</p>
-        <p style={{marginTop:8,fontSize:12,color:C.dim}}>Dados reais da B3 via Brapi API</p>
+        <p style={{marginTop:8,fontSize:12,color:C.dim}}>Cotação real B3 · Fundamentos estimados por IA</p>
       </div>
     );
 
-    const {d,ind,val,analise}=resultado;
-    const temFund = d._temFundamentos;
-
+    const r=resultado;
     return(
       <>
-        {/* Aviso se faltar fundamentalismo */}
-        {!temFund&&(
-          <div className="alert-box">
-            <span>⚠️</span>
-            <div>
-              <strong>Dados fundamentalistas limitados para {d.ticker}.</strong> Alguns indicadores podem estar indisponíveis ou estimados. O plano pago da Brapi disponibiliza dados completos de DRE e balanço patrimonial para todos os ativos.
-            </div>
+        {/* Aviso transparente */}
+        <div className="alert-box">
+          <span>ℹ️</span>
+          <div>
+            <strong>Transparência sobre os dados:</strong> O <strong>preço atual</strong>{r.dpaReal?" e os <strong>dividendos</strong>":""} são dados <strong>reais da B3</strong> via Brapi. Os demais fundamentos (LPA, VPA, EBITDA, margens etc.) são <strong>estimativas da IA</strong> com base no conhecimento da empresa — confiança: <strong>{r.fund.confianca_estimativas}</strong>. Para dados reais completos, considere o plano pago da Brapi.
           </div>
-        )}
+        </div>
 
         {/* Cabeçalho */}
         <div className="card" style={{marginBottom:20,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:16}}>
           <div>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-              <span className="mono" style={{fontSize:24,fontWeight:700,color:C.accent}}>{d.ticker}</span>
-              <span className="tag" style={{background:C.border,color:C.muted}}>{d.setor}</span>
-              <span className="source-badge source-real">✓ Dados Reais · Brapi</span>
+              <span className="mono" style={{fontSize:24,fontWeight:700,color:C.accent}}>{r.ticker}</span>
+              <span className="tag" style={{background:C.border,color:C.muted}}>{r.setor}</span>
+              <span className="source-badge source-real">✓ Preço Real · Brapi</span>
             </div>
-            <div style={{fontSize:16,fontWeight:600}}>{d.nome}</div>
-            {d.mktCap&&<div style={{fontSize:12,color:C.muted,marginTop:4}}>Market Cap: {fmtM(d.mktCap)}</div>}
+            <div style={{fontSize:16,fontWeight:600}}>{r.nome}</div>
+            {r.mktCap&&<div style={{fontSize:12,color:C.muted,marginTop:4}}>Market Cap: {fmtM(r.mktCap)} · Var. hoje: <span style={{color:r.change>=0?C.green:C.red}}>{r.change?.toFixed(2)||"—"}%</span></div>}
           </div>
-          <RecBadge rec={analise.recomendacao}/>
+          <RecBadge rec={r.analise.recomendacao}/>
         </div>
 
-        {/* KPIs principais */}
         <div className="grid3">
           <div className="metric-card">
-            <div className="metric-label">Preço Atual <SourceBadge real={true}/></div>
-            <div className="metric-value mono">{fmtBRL(d.preco)}</div>
-            <div className="metric-sub">Beta: {fmtN(d.beta)||"—"} · LPA: {fmtBRL(d.lpa)}</div>
+            <div className="metric-label">Preço Atual <span className="source-badge source-real">Real</span></div>
+            <div className="metric-value mono">{fmtBRL(r.preco)}</div>
+            <div className="metric-sub">Beta estimado: {fmtN(r.fund.beta)}</div>
           </div>
           <div className="metric-card">
-            <div className="metric-label">Valor Justo <SourceBadge real={temFund}/></div>
-            <div className="metric-value mono" style={{color:C.gold}}>{fmtBRL(val.valorJusto)}</div>
-            <div className="metric-sub">{val.modelos.length} modelos ponderados</div>
+            <div className="metric-label">Valor Justo <span className="source-badge source-est">Estimado</span></div>
+            <div className="metric-value mono" style={{color:C.gold}}>{fmtBRL(r.valorJusto)}</div>
+            <div className="metric-sub">{r.modelos.length} modelos ponderados</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Margem de Segurança</div>
-            <div className="metric-value mono" style={{color:val.margemSeg>15?C.green:val.margemSeg>0?C.yellow:C.red}}>
-              {fmtPct(val.margemSeg)}
+            <div className="metric-value mono" style={{color:r.margemSeg>15?C.green:r.margemSeg>0?C.yellow:C.red}}>
+              {fmtPct(r.margemSeg)}
             </div>
-            <div className="metric-sub">{val.margemSeg>0?"Desconto em relação ao justo":"Acima do valor justo"}</div>
+            <div className="metric-sub">{r.margemSeg>0?"Desconto em relação ao justo":"Acima do valor justo"}</div>
           </div>
         </div>
 
         <div className="grid3">
-          {/* Score */}
           <div className="metric-card" style={{textAlign:"center"}}>
             <div className="metric-label">Score IA</div>
-            <ScoreRing score={analise.score_ia}/>
-            <div style={{color:C.muted,fontSize:12}}>Confiança: <strong style={{color:C.text}}>{analise.nivel_confianca}</strong></div>
+            <ScoreRing score={r.analise.score_ia}/>
+            <div style={{color:C.muted,fontSize:12}}>Confiança: <strong style={{color:C.text}}>{r.analise.nivel_confianca}</strong></div>
           </div>
-          {/* DY + ROE */}
           <div className="metric-card">
-            <div className="metric-label">Dividend Yield <SourceBadge real={d._temDividendos}/></div>
-            <div className="metric-value mono" style={{color:C.gold}}>{fmtPct(d.dyPct)}</div>
-            <div className="metric-sub">DPA estimado: {fmtBRL(d.dpa)}</div>
+            <div className="metric-label">Dividend Yield <span className="source-badge source-real">Real</span></div>
+            <div className="metric-value mono" style={{color:C.gold}}>{fmtPct(r.dyPct)}</div>
+            <div className="metric-sub">DPA 12m: {fmtBRL(r.dpa)} {r.dpaReal?"(real)":"(estimado)"}</div>
             <hr style={{border:"none",borderTop:`1px solid ${C.border}`,margin:"14px 0"}}/>
-            <div className="metric-label">ROE / ROIC</div>
+            <div className="metric-label">ROE / ROIC <span className="source-badge source-est">Est.</span></div>
             <div style={{display:"flex",gap:16}}>
-              <div><div className="mono" style={{fontSize:20,fontWeight:600,color:d.roe>15?C.green:C.yellow}}>{fmtPct(d.roe)}</div><div style={{fontSize:11,color:C.muted}}>ROE</div></div>
-              <div><div className="mono" style={{fontSize:20,fontWeight:600,color:d.roic>12?C.green:C.yellow}}>{fmtPct(d.roic)}</div><div style={{fontSize:11,color:C.muted}}>ROIC</div></div>
+              <div><div className="mono" style={{fontSize:20,fontWeight:600,color:r.fund.roe>15?C.green:C.yellow}}>{fmtPct(r.fund.roe)}</div><div style={{fontSize:11,color:C.muted}}>ROE</div></div>
+              <div><div className="mono" style={{fontSize:20,fontWeight:600,color:r.fund.roic>12?C.green:C.yellow}}>{fmtPct(r.fund.roic)}</div><div style={{fontSize:11,color:C.muted}}>ROIC</div></div>
             </div>
           </div>
-          {/* Modelos */}
           <div className="metric-card">
             <div className="metric-label">Modelos de Valuation</div>
-            {val.modelos.map(m=>(
+            {r.modelos.map(m=>(
               <div key={m.nome} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:`1px solid ${C.dim}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:12,color:C.muted}}>{m.nome}</span>
-                  <SourceBadge real={m.real}/>
-                </div>
-                <span className="mono" style={{fontSize:13,color:m.v>d.preco?C.green:C.red}}>{fmtBRL(m.v)}</span>
+                <span style={{fontSize:12,color:C.muted}}>{m.nome}</span>
+                <span className="mono" style={{fontSize:13,color:m.v>r.preco?C.green:C.red}}>{fmtBRL(m.v)}</span>
               </div>
             ))}
-            {val.modelos.length===0&&<div style={{color:C.muted,fontSize:13}}>Dados insuficientes para valuation</div>}
           </div>
         </div>
 
-        {/* IA */}
-        <div className="ai-block"><h4>Resumo Executivo</h4><p>{analise.resumo_executivo}</p></div>
+        <div className="ai-block"><h4>Resumo Executivo</h4><p>{r.analise.resumo_executivo}</p></div>
         <div className="grid2" style={{marginBottom:20}}>
-          <div className="ai-block" style={{marginBottom:0}}><h4>✅ Pontos Positivos</h4><ul>{analise.pontos_positivos?.map((p,i)=><li key={i}>{p}</li>)}</ul></div>
-          <div className="ai-block" style={{marginBottom:0}}><h4>⚠️ Pontos de Atenção</h4><ul>{analise.pontos_atencao?.map((p,i)=><li key={i}>{p}</li>)}</ul></div>
+          <div className="ai-block" style={{marginBottom:0}}><h4>✅ Pontos Positivos</h4><ul>{r.analise.pontos_positivos?.map((p,i)=><li key={i}>{p}</li>)}</ul></div>
+          <div className="ai-block" style={{marginBottom:0}}><h4>⚠️ Pontos de Atenção</h4><ul>{r.analise.pontos_atencao?.map((p,i)=><li key={i}>{p}</li>)}</ul></div>
         </div>
         <div className="grid2">
-          <div className="ai-block" style={{marginBottom:0}}><h4>🔴 Principais Riscos</h4><ul>{analise.principais_riscos?.map((p,i)=><li key={i}>{p}</li>)}</ul></div>
-          <div className="ai-block" style={{marginBottom:0}}><h4>📌 Fundamentação</h4><p>{analise.fundamentacao}</p></div>
+          <div className="ai-block" style={{marginBottom:0}}><h4>🔴 Principais Riscos</h4><ul>{r.analise.principais_riscos?.map((p,i)=><li key={i}>{p}</li>)}</ul></div>
+          <div className="ai-block" style={{marginBottom:0}}><h4>📌 Fundamentação</h4><p>{r.analise.fundamentacao}</p></div>
         </div>
-
         <hr className="divider"/>
-
-        {/* Financeiros */}
-        <div className="sec-hdr">Dados Financeiros Reais</div>
-        <div className="grid3" style={{marginBottom:20}}>
-          {[
-            ["Receita (TTM)",   d.receita],
-            ["EBITDA (TTM)",    d.ebitda],
-            ["Lucro Líq. (TTM)",d.lucroLiq],
-            ["FCL (TTM)",       d.freeCF],
-            ["Dívida Total",    d.totalDeb],
-            ["Patrim. Líquido", d.pl_],
-          ].map(([k,v])=>(
-            <div key={k} className="metric-card" style={{padding:"14px 18px"}}>
-              <div className="metric-label">{k}</div>
-              <div className="mono" style={{fontSize:18,fontWeight:600,color:v>=0?C.text:C.red}}>{fmtM(v)}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Indicadores completos */}
-        <div className="sec-hdr">Todos os Indicadores</div>
+        <div className="sec-hdr">Todos os Indicadores <span className="source-badge source-est" style={{marginLeft:8}}>Fundamentos estimados por IA</span></div>
         <div className="ind-grid">
-          {Object.entries(ind).map(([k,v])=>(
-            <Ind key={k} name={k} val={v.val} sinal={v.sinal} unit={v.unit||""}/>
-          ))}
+          {Object.entries(r.ind).map(([k,v])=><Ind key={k} name={k} val={v.val} sinal={v.sinal} unit={v.unit||""}/>)}
         </div>
       </>
     );
   };
 
-  // ── RENDER COMPARAÇÃO ───────────────────────────────────────────────────────
   const renderComparacao=()=>(
     <>
-      <div className="sec-hdr" style={{marginBottom:20}}>Comparação de Até 5 Ações — Dados Reais</div>
+      <div className="sec-hdr" style={{marginBottom:20}}>Comparação de Até 5 Ações</div>
       <div className="compare-grid" style={{marginBottom:16}}>
         {tickers5.map((t,i)=>(
           <input key={i} className="compare-input" placeholder={`Ticker ${i+1}`} value={t}
             onChange={e=>{const n=[...tickers5];n[i]=e.target.value.toUpperCase();setTickers5(n);}} maxLength={6}/>
         ))}
       </div>
-      <button className="btn" style={{marginBottom:28}} onClick={compararAcoes}
-        disabled={loadingComp||tickers5.filter(t=>t.trim()).length<2}>
+      <button className="btn" style={{marginBottom:28}} onClick={compararAcoes} disabled={loadingComp||tickers5.filter(t=>t.trim()).length<2}>
         {loadingComp?"Analisando…":"Comparar Ações"}
       </button>
       {erro&&<div style={{color:C.red,marginBottom:16,fontSize:13}}>⚠️ {erro}</div>}
-      {loadingComp&&<div className="loading-wrap"><div className="spinner"/><div style={{color:C.muted,fontSize:13}}>Buscando dados reais em paralelo…</div></div>}
+      {loadingComp&&<div className="loading-wrap"><div className="spinner"/><div style={{color:C.muted,fontSize:13}}>Analisando em paralelo…</div></div>}
       {comparacao&&(
         <>
           <div className="sec-hdr">Ranking por Score IA</div>
           <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:28}}>
             {[...comparacao].sort((a,b)=>b.analise.score_ia-a.analise.score_ia).map((r,i)=>(
-              <div key={r.d.ticker} className="card" style={{display:"flex",alignItems:"center",gap:16}}>
+              <div key={r.ticker} className="card" style={{display:"flex",alignItems:"center",gap:16}}>
                 <div style={{width:32,height:32,borderRadius:8,background:i===0?C.gold:C.border,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:i===0?"#000":C.muted,flexShrink:0}}>{i+1}</div>
                 <div style={{flex:1}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:8}}>
-                    <span className="mono" style={{fontWeight:700}}>{r.d.ticker}</span>
-                    <span style={{fontSize:12,color:C.muted}}>{r.d.nome}</span>
+                    <span className="mono" style={{fontWeight:700}}>{r.ticker}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{r.nome}</span>
                     <span style={{color:scoreColor(r.analise.score_ia),fontWeight:700}}>Score {r.analise.score_ia}</span>
                   </div>
                   <div className="prog-bar-wrap"><div className="prog-bar" style={{width:`${r.analise.score_ia}%`,background:scoreColor(r.analise.score_ia)}}/></div>
@@ -649,32 +502,30 @@ export default function App(){
               </div>
             ))}
           </div>
-          <div className="sec-hdr">Comparativo de Indicadores</div>
+          <div className="sec-hdr">Comparativo</div>
           <div className="card" style={{overflowX:"auto"}}>
             <table className="hist-table">
-              <thead><tr><th>Indicador</th>{comparacao.map(r=><th key={r.d.ticker}>{r.d.ticker}</th>)}<th>🏆 Melhor</th></tr></thead>
+              <thead><tr><th>Indicador</th>{comparacao.map(r=><th key={r.ticker}>{r.ticker}</th>)}<th>🏆</th></tr></thead>
               <tbody>
                 {[
-                  {label:"Preço",       fn:r=>fmtBRL(r.d.preco),          best:r=>-r.d.preco},
-                  {label:"Valor Justo", fn:r=>fmtBRL(r.val.valorJusto),   best:r=>r.val.valorJusto||0},
-                  {label:"Margem Seg.", fn:r=>fmtPct(r.val.margemSeg),    best:r=>r.val.margemSeg||0},
-                  {label:"Score IA",    fn:r=>r.analise.score_ia,          best:r=>r.analise.score_ia},
-                  {label:"P/L",         fn:r=>fmtN(r.d.pl),               best:r=>-(r.d.pl||999)},
-                  {label:"P/VP",        fn:r=>fmtN(r.d.pvp),              best:r=>-(r.d.pvp||999)},
-                  {label:"DY",          fn:r=>fmtPct(r.d.dyPct),          best:r=>r.d.dyPct||0},
-                  {label:"ROE",         fn:r=>fmtPct(r.d.roe),            best:r=>r.d.roe||0},
-                  {label:"ROIC",        fn:r=>fmtPct(r.d.roic),           best:r=>r.d.roic||0},
-                  {label:"Margem Líq.", fn:r=>fmtPct(r.d.mLiq),          best:r=>r.d.mLiq||0},
-                  {label:"Dív/EBITDA",  fn:r=>fmtN(r.d.divEbitda),       best:r=>-(r.d.divEbitda||999)},
-                  {label:"EV/EBITDA",   fn:r=>fmtN(r.d.evEbitda),        best:r=>-(r.d.evEbitda||999)},
+                  {label:"Preço ✓Real",  fn:r=>fmtBRL(r.preco),         best:r=>-r.preco},
+                  {label:"Valor Justo",  fn:r=>fmtBRL(r.valorJusto),    best:r=>r.valorJusto||0},
+                  {label:"Margem Seg.",  fn:r=>fmtPct(r.margemSeg),     best:r=>r.margemSeg||0},
+                  {label:"Score IA",     fn:r=>r.analise.score_ia,       best:r=>r.analise.score_ia},
+                  {label:"P/L",          fn:r=>fmtN(r.pL),              best:r=>-(r.pL||999)},
+                  {label:"DY ✓Real",     fn:r=>fmtPct(r.dyPct),         best:r=>r.dyPct||0},
+                  {label:"ROE",          fn:r=>fmtPct(r.fund.roe),       best:r=>r.fund.roe||0},
+                  {label:"ROIC",         fn:r=>fmtPct(r.fund.roic),      best:r=>r.fund.roic||0},
+                  {label:"Margem Líq.",  fn:r=>fmtPct(r.fund.margem_liquida), best:r=>r.fund.margem_liquida||0},
+                  {label:"Dív/EBITDA",   fn:r=>fmtN(r.fund.divida_ebitda),   best:r=>-(r.fund.divida_ebitda||999)},
                 ].map(({label,fn,best})=>{
                   const vals=comparacao.map(best);
-                  const bestIdx=vals.indexOf(Math.max(...vals));
+                  const bi=vals.indexOf(Math.max(...vals));
                   return(
                     <tr key={label}>
                       <td style={{color:C.muted,fontWeight:600}}>{label}</td>
-                      {comparacao.map((r,i)=><td key={i} className="mono" style={{color:i===bestIdx?C.green:C.text,fontWeight:i===bestIdx?700:400}}>{fn(r)}</td>)}
-                      <td style={{color:C.green,fontWeight:700}}>{comparacao[bestIdx]?.d.ticker}</td>
+                      {comparacao.map((r,i)=><td key={i} className="mono" style={{color:i===bi?C.green:C.text,fontWeight:i===bi?700:400}}>{fn(r)}</td>)}
+                      <td style={{color:C.green,fontWeight:700}}>{comparacao[bi]?.ticker}</td>
                     </tr>
                   );
                 })}
@@ -686,7 +537,6 @@ export default function App(){
     </>
   );
 
-  // ── RENDER HISTÓRICO ────────────────────────────────────────────────────────
   const renderHistorico=()=>(
     <>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
@@ -698,13 +548,12 @@ export default function App(){
       ):(
         <div className="card" style={{overflowX:"auto"}}>
           <table className="hist-table">
-            <thead><tr><th>Data/Hora</th><th>Ticker</th><th>Fonte</th><th>Preço</th><th>Valor Justo</th><th>Score IA</th><th>Recomendação</th></tr></thead>
+            <thead><tr><th>Data/Hora</th><th>Ticker</th><th>Preço Real</th><th>Valor Justo</th><th>Score IA</th><th>Recomendação</th></tr></thead>
             <tbody>
               {historico.map((h,i)=>(
                 <tr key={i}>
                   <td className="mono" style={{color:C.muted,fontSize:12}}>{h.data.toLocaleDateString("pt-BR")} {h.data.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</td>
                   <td className="mono" style={{fontWeight:700,color:C.accent}}>{h.ticker}</td>
-                  <td><SourceBadge real={h.temFund}/></td>
                   <td className="mono">{fmtBRL(h.preco)}</td>
                   <td className="mono" style={{color:C.gold}}>{fmtBRL(h.valorJusto)}</td>
                   <td><span style={{color:scoreColor(h.score),fontWeight:700}}>{h.score}</span></td>
@@ -725,14 +574,10 @@ export default function App(){
         <header className="header">
           <div className="logo">
             <div className="logo-icon">📈</div>
-            <div><div className="logo-text">Valuation B3</div><div className="logo-sub">Dados Reais · IA Analítica</div></div>
+            <div><div className="logo-text">Valuation B3</div><div className="logo-sub">Cotação Real · IA Analítica</div></div>
           </div>
-          <div style={{fontSize:12,color:C.muted,textAlign:"right"}}>
-            <div>Powered by Claude AI</div>
-            <div style={{color:C.dim}}>Dados: Brapi · CVM · B3</div>
-          </div>
+          <div style={{fontSize:12,color:C.muted,textAlign:"right"}}><div>Powered by Claude AI</div><div style={{color:C.dim}}>Preço Real: Brapi · B3</div></div>
         </header>
-
         <div className="search-wrap">
           <input className="ticker-input" placeholder="TICKER" value={ticker}
             onChange={e=>setTicker(e.target.value.toUpperCase())}
@@ -741,16 +586,14 @@ export default function App(){
             {loading?"Analisando…":"Analisar"}
           </button>
         </div>
-
         <div className="tabs">
           {[{id:"analise",label:"📊 Análise"},{id:"comparacao",label:"⚖️ Comparação"},{id:"historico",label:"📋 Histórico"}].map(t=>(
             <button key={t.id} className={`tab ${aba===t.id?"active":""}`} onClick={()=>setAba(t.id)}>{t.label}</button>
           ))}
         </div>
-
-        {aba==="analise"    && renderAnalise()}
-        {aba==="comparacao" && renderComparacao()}
-        {aba==="historico"  && renderHistorico()}
+        {aba==="analise"&&renderAnalise()}
+        {aba==="comparacao"&&renderComparacao()}
+        {aba==="historico"&&renderHistorico()}
       </div>
     </>
   );

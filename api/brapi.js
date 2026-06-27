@@ -1,5 +1,4 @@
-// api/brapi.js — Vercel Serverless: proxy seguro para Brapi
-// Protege o BRAPI_TOKEN no servidor.
+// api/brapi.js — plano gratuito Brapi (apenas cotação + summaryProfile + dividendos)
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -12,16 +11,8 @@ export default async function handler(req, res) {
   const token = process.env.BRAPI_TOKEN;
   if (!token) return res.status(500).json({ error: "BRAPI_TOKEN não configurado" });
 
-  const modules = [
-    "defaultKeyStatistics",
-    "financialData",
-    "balanceSheetHistory",
-    "incomeStatementHistory",
-    "cashflowHistory",
-    "summaryProfile",
-  ].join(",");
-
-  const url = `https://brapi.dev/api/quote/${encodeURIComponent(ticker)}?dividends=true&modules=${modules}&token=${token}`;
+  // Plano gratuito: apenas summaryProfile (sem módulos pagos)
+  const url = `https://brapi.dev/api/quote/${encodeURIComponent(ticker)}?dividends=true&modules=summaryProfile&token=${token}`;
 
   try {
     const r = await fetch(url);
